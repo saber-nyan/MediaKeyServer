@@ -6,6 +6,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
+using System.Threading;
 using CommandLine;
 using Newtonsoft.Json.Linq;
 
@@ -69,8 +70,9 @@ namespace KeyServer {
 
 					var keyName = Convert.FromBase64String(json["key"].ToString())[0];
 					Console.WriteLine($"Pressing key '{keyName}'...");
-					keybd_event(keyName, 0, KeyeventfExtendedkey, 0);
-					keybd_event(keyName, 0, KeyeventfKeyup, 0);
+					keybd_event(keyName, 0x45, KeyeventfExtendedkey, 0);
+					Thread.Sleep(100);
+					keybd_event(keyName, 0x45, KeyeventfKeyup, 0);
 
 
 					var oJson = new JObject {
