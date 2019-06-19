@@ -9,12 +9,14 @@ using System.Text;
 using System.Threading;
 using CommandLine;
 using Newtonsoft.Json.Linq;
+using NLog;
 
 namespace KeyServer {
 	internal static class Program {
 		private const int KeyeventfExtendedkey = 0x0001; //Key down flag
 		private const int KeyeventfKeyup = 0x0002; //Key up flag
 		private const string Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+		private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 		private static readonly Random Random = new Random();
 
 		[DllImport("user32.dll", SetLastError = true)]
@@ -31,7 +33,7 @@ namespace KeyServer {
 					if (string.IsNullOrEmpty(o.Token)) {
 						authToken = new string(Enumerable.Repeat(Chars, 16)
 							.Select(s => s[Random.Next(s.Length)]).ToArray());
-						Console.WriteLine($"Generated new token: {authToken}");
+						Logger.Info($"Generated new token: {authToken}");
 					}
 					else {
 						authToken = o.Token;
@@ -42,10 +44,10 @@ namespace KeyServer {
 		}
 
 		private static void StartServer(string authToken, string url, int port) {
-			Console.WriteLine("Starting server...\n" +
-			                  "Please remember to execute `netsh http add urlacl url=http://+:8089/ user=EVERYONE`");
+			Logger.Info("Starting server...\n" +
+			            "Please remember to execute `netsh http add urlacl url=http://+:8089/ user=EVERYONE`");
 			if (!HttpListener.IsSupported) {
-				Console.WriteLine("Server is not supported, aborting!");
+				Logger.Fatal("Server is not supported, aborting!");
 				return;
 			}
 
@@ -53,14 +55,14 @@ namespace KeyServer {
 			var server = new HttpListener();
 			server.Prefixes.Add($"{listenAddress}/pressKey/");
 			server.Start();
-			Console.WriteLine($"Server started on {listenAddress}!");
+			Logger.Info($"Server started on {listenAddress}!");
 
 			while (true) {
 				var context = server.GetContext();
 				var request = context.Request;
 				var requestString = new StreamReader(request.InputStream).ReadToEnd();
 
-				Console.WriteLine($"Got request {requestString}");
+				Logger.Debug($"Got request {requestString}");
 
 				var response = context.Response;
 				byte[] responseBuffer;
@@ -69,7 +71,7 @@ namespace KeyServer {
 					if (json["token"].ToString() != authToken) throw new SecurityException("Invalid auth token.");
 
 					var keyName = Convert.FromBase64String(json["key"].ToString())[0];
-					Console.WriteLine($"Pressing key '{keyName}'...");
+					Logger.Trace($"Pressing key '{keyName}'...");
 					keybd_event(keyName, 0x45, KeyeventfExtendedkey, 0);
 					Thread.Sleep(100);
 					keybd_event(keyName, 0x45, KeyeventfKeyup, 0);
@@ -81,7 +83,7 @@ namespace KeyServer {
 					responseBuffer = Encoding.UTF8.GetBytes(oJson.ToString());
 				}
 				catch (Exception e) {
-					Console.WriteLine($"Error while parsing: {e}");
+					Logger.Warn(e, "Failed to parse JSON!");
 					var oJson = new JObject {
 						["success"] = false,
 						["errorName"] = e.GetType().ToString(),
