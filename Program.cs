@@ -7,6 +7,8 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
+using Windows.Media.Control;
 using CommandLine;
 using Newtonsoft.Json.Linq;
 using NLog;
@@ -39,11 +41,11 @@ namespace KeyServer {
 						authToken = o.Token;
 					}
 
-					StartServer(authToken, o.Url, o.Port);
+					StartServer(authToken, o.Url, o.Port).Wait();
 				});
 		}
 
-		private static void StartServer(string authToken, string url, int port) {
+		private static async Task StartServer(string authToken, string url, int port) {
 			Logger.Info("Starting server...\n" +
 			            "Please remember to execute `netsh http add urlacl url=http://+:8089/ user=EVERYONE`");
 			if (!HttpListener.IsSupported) {
@@ -70,17 +72,38 @@ namespace KeyServer {
 					var json = JObject.Parse(requestString);
 					if (json["token"].ToString() != authToken) throw new SecurityException("Invalid auth token.");
 
-					var keyName = Convert.FromBase64String(json["key"].ToString())[0];
-					Logger.Trace($"Pressing key '{keyName}'...");
-					keybd_event(keyName, 0x45, KeyeventfExtendedkey, 0);
-					Thread.Sleep(100);
-					keybd_event(keyName, 0x45, KeyeventfKeyup, 0);
+					var action = json["action"].ToString();
+					switch (action) {
+						case "pressKey": {
+							var keyName = Convert.FromBase64String(json["key"].ToString())[0];
+							Logger.Trace($"Pressing key '{keyName}'...");
+							keybd_event(keyName, 0x45, KeyeventfExtendedkey, 0);
+							Thread.Sleep(100);
+							keybd_event(keyName, 0x45, KeyeventfKeyup, 0);
 
+							var oJson = new JObject {
+								["success"] = true
+							};
+							responseBuffer = Encoding.UTF8.GetBytes(oJson.ToString());
+							break;
+						}
 
-					var oJson = new JObject {
-						["success"] = true
-					};
-					responseBuffer = Encoding.UTF8.GetBytes(oJson.ToString());
+						case "getInfo": {
+							var sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+							var mediaProperties = await sessionManager.GetCurrentSession().TryGetMediaPropertiesAsync();
+
+							var oJson = new JObject {
+								["success"] = true,
+								["title"] = mediaProperties.Title
+							};
+							responseBuffer = Encoding.UTF8.GetBytes(oJson.ToString());
+							break;
+						}
+
+						default: {
+							throw new Exception($"Unknown action {action}");
+						}
+					}
 				}
 				catch (Exception e) {
 					Logger.Warn(e, "Failed to parse JSON!");
