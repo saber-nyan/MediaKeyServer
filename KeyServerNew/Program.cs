@@ -9,7 +9,6 @@ using System.Runtime.Serialization;
 using System.Security;
 using System.ServiceProcess;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Windows.Media.Control;
@@ -41,14 +40,9 @@ namespace KeyServerNew {
 		}
 
 		private const string Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-		// ReSharper disable once InconsistentNaming
-		private const int KEYEVENTF_EXTENDEDKEY = 0x0001;
-
-		// ReSharper disable once InconsistentNaming
-		private const int KEYEVENTF_KEYUP = 0x0002;
-		private readonly CoreAudioDevice _defaultAudioDevice;
 		private readonly IEnumerable<string> _args;
+
+		private readonly CoreAudioDevice _defaultAudioDevice;
 		private Logger _logger;
 
 		public MediaKeyService(IEnumerable<string> args) {
@@ -58,9 +52,6 @@ namespace KeyServerNew {
 
 		[DllImport("advapi32.dll", SetLastError = true)]
 		private static extern bool SetServiceStatus(IntPtr handle, ref ServiceStatus serviceStatus);
-
-		[DllImport("user32.dll", SetLastError = true)]
-		private static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
 
 		protected override void OnStart(string[] arg) {
 			base.OnStart(arg);
@@ -241,27 +232,39 @@ namespace KeyServerNew {
 			var action = request["action"]?.ToString();
 			switch (action) {
 				case "prev": {
-					PressKey(0xB1);
+//					PressKey(0xB1);
+					var sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+					var currentSession = sessionManager.GetCurrentSession();
+					await currentSession.TrySkipPreviousAsync();
 					break;
 				}
 				case "pause": {
-					PressKey(0xB3);
+//					PressKey(0xB3);
+					var sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+					var currentSession = sessionManager.GetCurrentSession();
+					await currentSession.TryTogglePlayPauseAsync();
 					break;
 				}
 				case "next": {
-					PressKey(0xB0);
+//					PressKey(0xB0);
+					var sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+					var currentSession = sessionManager.GetCurrentSession();
+					await currentSession.TrySkipNextAsync();
 					break;
 				}
 				case "volDown": {
-					PressKey(0xAE);
+//					PressKey(0xAE);
+					await _defaultAudioDevice.SetVolumeAsync(_defaultAudioDevice.Volume - 3);
 					break;
 				}
 				case "mute": {
-					PressKey(0xAD);
+//					PressKey(0xAD);
+					await _defaultAudioDevice.SetMuteAsync(!_defaultAudioDevice.IsMuted);
 					break;
 				}
 				case "volUp": {
-					PressKey(0xAF);
+//					PressKey(0xAF);
+					await _defaultAudioDevice.SetVolumeAsync(_defaultAudioDevice.Volume - 3);
 					break;
 				}
 				case "setVol": {
@@ -312,13 +315,6 @@ namespace KeyServerNew {
 			_logger.Trace("Got result: {json}", resultObj);
 
 			return resultObj;
-		}
-
-		private void PressKey(byte keyCode) {
-			_logger.Trace("Pressing key {keyCode}", keyCode);
-			keybd_event(keyCode, 0x45, KEYEVENTF_EXTENDEDKEY | 0, 0);
-			Thread.Sleep(50);
-			keybd_event(keyCode, 0x45, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
 		}
 
 		[SuppressMessage("ReSharper", "ALL")]
