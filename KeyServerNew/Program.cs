@@ -254,7 +254,7 @@ namespace KeyServerNew {
 				}
 				case "volDown": {
 //					PressKey(0xAE);
-					await _defaultAudioDevice.SetVolumeAsync(_defaultAudioDevice.Volume - 3);
+					await _defaultAudioDevice.SetVolumeAsync(_defaultAudioDevice.Volume - 2);
 					break;
 				}
 				case "mute": {
@@ -264,7 +264,7 @@ namespace KeyServerNew {
 				}
 				case "volUp": {
 //					PressKey(0xAF);
-					await _defaultAudioDevice.SetVolumeAsync(_defaultAudioDevice.Volume - 3);
+					await _defaultAudioDevice.SetVolumeAsync(_defaultAudioDevice.Volume + 2);
 					break;
 				}
 				case "setVol": {
