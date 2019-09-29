@@ -60,18 +60,21 @@
 		</Reference>
 		<Reference Include="System"/>
 		<Reference Include="System.Configuration"/>
+		<Reference Include="System.Configuration.Install"/>
 		<Reference Include="System.Core"/>
 		<Reference Include="System.Data"/>
 		<Reference Include="System.IO.Compression"/>
 		<Reference Include="System.Runtime.Serialization"/>
 		<Reference Include="System.Runtime.WindowsRuntime"/>
 		<Reference Include="System.ServiceModel"/>
+		<Reference Include="System.ServiceProcess"/>
 		<Reference Include="System.Transactions"/>
 		<Reference Include="System.Windows"/>
 		<Reference Include="System.Windows.Forms"/>
 		<Reference Include="System.Xml"/>
 		<Reference Include="Windows, Version=255.255.255.255, Culture=neutral, PublicKeyToken=null, ContentType=WindowsRuntime">
 			<HintPath>C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.18362.0\Windows.winmd</HintPath>
+			<HintPath>D:\Windows Kits\10\UnionMetadata\10.0.18362.0\Windows.winmd</HintPath>
 		</Reference>
 	</ItemGroup>
 	<ItemGroup>
@@ -94,10 +97,10 @@
 		<Error Condition="!Exists('..\packages\Costura.Fody.4.1.0\build\Costura.Fody.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Costura.Fody.4.1.0\build\Costura.Fody.props'))"/>
 	</Target>
 	<!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
-			 Other similar extension points exist, see Microsoft.Common.targets.
-		<Target Name="BeforeBuild">
-		</Target>
-		<Target Name="AfterBuild">
-		</Target>
-		-->
+			   Other similar extension points exist, see Microsoft.Common.targets.
+		  <Target Name="BeforeBuild">
+		  </Target>
+		  <Target Name="AfterBuild">
+		  </Target>
+		  -->
 </Project>

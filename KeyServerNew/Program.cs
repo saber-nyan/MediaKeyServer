@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
@@ -6,6 +7,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Security;
+using System.ServiceProcess;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,32 +23,72 @@ using NLog.Targets;
 
 namespace KeyServerNew {
 	internal static class Program {
+		public static void Main(string[] args) {
+			ServiceBase.Run(new MediaKeyService(args));
+		}
+	}
+
+	internal class MediaKeyService : ServiceBase {
+		[SuppressMessage("ReSharper", "ALL")]
+		public enum ServiceState {
+			SERVICE_STOPPED = 0x00000001,
+			SERVICE_START_PENDING = 0x00000002,
+			SERVICE_STOP_PENDING = 0x00000003,
+			SERVICE_RUNNING = 0x00000004,
+			SERVICE_CONTINUE_PENDING = 0x00000005,
+			SERVICE_PAUSE_PENDING = 0x00000006,
+			SERVICE_PAUSED = 0x00000007
+		}
+
 		private const string Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-		private const int KeyeventKeydown = 0x0001; //Key down flag
-		private const int KeyeventKeyup = 0x0002; //Key up flag
-		private static Logger _logger;
-		private static readonly CoreAudioDevice DefaultAudioDevice;
+		// ReSharper disable once InconsistentNaming
+		private const int KEYEVENTF_EXTENDEDKEY = 0x0001;
 
-		static Program() {
-			DefaultAudioDevice = new CoreAudioController().DefaultPlaybackDevice;
+		// ReSharper disable once InconsistentNaming
+		private const int KEYEVENTF_KEYUP = 0x0002;
+		private readonly CoreAudioDevice _defaultAudioDevice;
+		private readonly IEnumerable<string> _args;
+		private Logger _logger;
+
+		public MediaKeyService(IEnumerable<string> args) {
+			_defaultAudioDevice = new CoreAudioController().DefaultPlaybackDevice;
+			_args = args;
 		}
+
+		[DllImport("advapi32.dll", SetLastError = true)]
+		private static extern bool SetServiceStatus(IntPtr handle, ref ServiceStatus serviceStatus);
 
 		[DllImport("user32.dll", SetLastError = true)]
 		private static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
 
-		public static void Main(string[] args) {
-			var logConfig = new LoggingConfiguration();
-			var logFile = new FileTarget("logFile") {
-				FileName = "KeyServer.log",
-				ArchiveAboveSize = 2000000,
-				EnableArchiveFileCompression = true,
-				Encoding = Encoding.UTF8,
-				KeepFileOpen = true,
-				WriteBom = false,
-				Layout =
-					@"${longdate}|${level:uppercase=true}|${logger}|${callsite:methodName=false:className=false:fileName=true:includeSourcePath=false}|${message}"
+		protected override void OnStart(string[] arg) {
+			base.OnStart(arg);
+			var serviceStatus = new ServiceStatus {
+				dwCurrentState = ServiceState.SERVICE_START_PENDING,
+				dwWaitHint = 3000
 			};
+			SetServiceStatus(ServiceHandle, ref serviceStatus);
+			InitServer();
+		}
+
+		protected override void OnStop() {
+			base.OnStop();
+			_logger.Info("Stopping...");
+		}
+
+		private void InitServer() {
+			var logConfig = new LoggingConfiguration();
+//			var logFile = new FileTarget("logFile") {
+//				FileName = "KeyServer.log",
+//				ArchiveAboveSize = 2000000,
+//				EnableArchiveFileCompression = true,
+//				Encoding = Encoding.UTF8,
+//				KeepFileOpen = true,
+//				WriteBom = false,
+//				Layout =
+//					@"${longdate}|${level:uppercase=true}|${logger}|${callsite:methodName=false:className=false:fileName=true:includeSourcePath=false}|${message}"
+//			};
 			var logConsole = new ColoredConsoleTarget("logConsole") {
 				EnableAnsiOutput = false,
 				ErrorStream = true,
@@ -56,14 +98,19 @@ namespace KeyServerNew {
 				Layout =
 					@"${time} ${level:uppercase=true} ${callsite:methodName=false:className=false:fileName=true:includeSourcePath=false} ${message}"
 			};
-			logConfig.AddRule(LogLevel.Debug, LogLevel.Fatal, logConsole);
-			logConfig.AddRule(LogLevel.Trace, LogLevel.Fatal, logFile);
+			var logSystem = new EventLogTarget("logSystem") {
+				Layout =
+					@"${longdate}|${level:uppercase=true}|${logger}|${callsite:methodName=false:className=false:fileName=true:includeSourcePath=false}|${message}"
+			};
+			logConfig.AddRule(LogLevel.Trace, LogLevel.Fatal, logConsole);
+//			logConfig.AddRule(LogLevel.Debug, LogLevel.Fatal, logFile);
+			logConfig.AddRule(LogLevel.Debug, LogLevel.Fatal, logSystem);
 
 			LogManager.Configuration = logConfig;
 			_logger = LogManager.GetCurrentClassLogger();
 
-			Parser.Default.ParseArguments<Options>(args)
-				.WithParsed(o => {
+			Parser.Default.ParseArguments<Options>(_args)
+				.WithParsed(async o => {
 					_logger.Info("Starting...");
 					_logger.Debug("Arguments parsed: {arguments}", o);
 					string accessToken;
@@ -79,26 +126,32 @@ namespace KeyServerNew {
 						accessToken = o.AccessToken;
 					}
 
-					StartServer(accessToken, o.Url, o.Port).Wait();
+					await StartServer(accessToken, o.Url, o.Port);
 				});
 		}
 
-		private static async Task StartServer(string accessToken, string url, int port) {
+		private async Task StartServer(string accessToken, string url, int port) {
 			if (!HttpListener.IsSupported) {
 				_logger.Fatal("Server is not supported, aborting!");
 				return;
 			}
 
-			var listenAddress = $"{url}:{port}";
+			var listenAddress = $"{url}:{port}/";
 			_logger.Info("Starting server...");
 			_logger.Info(
-				"Remember to execute `netsh http add url.acl url={listenUrl}/ user=EVERYONE`! (or `user=Все` in russian locale)",
+				"Remember to execute `netsh http add urlacl url=\"{listenUrl}\" user=EVERYONE`! (or `user=Все` in russian locale)",
 				listenAddress);
 			var server = new HttpListener();
-			server.Prefixes.Add($"{listenAddress}/mediaApi/");
+			server.Prefixes.Add($"{listenAddress}mediaApi/");
 			server.Start();
 
 			_logger.Info("Server started on {listenAddress}", listenAddress);
+
+			var serviceStatus = new ServiceStatus {
+				dwCurrentState = ServiceState.SERVICE_RUNNING,
+				dwWaitHint = 3000
+			};
+			SetServiceStatus(ServiceHandle, ref serviceStatus);
 
 			while (true) {
 				var context = await server.GetContextAsync();
@@ -119,7 +172,7 @@ namespace KeyServerNew {
 					};
 				}
 				catch (Exception e) {
-					_logger.Error(e, "Unexpected exception occured!");
+					_logger.Error(e, "SHIT! Unexpected exception occured!\nTrace: {trace}", e.ToString());
 					result = new JObject {
 						["success"] = false,
 						["error"] = e.GetType().ToString(),
@@ -127,7 +180,7 @@ namespace KeyServerNew {
 					};
 				}
 
-				var responseBuffer = Encoding.UTF8.GetBytes(result.ToString());
+				byte[] responseBuffer = Encoding.UTF8.GetBytes(result.ToString());
 				response.ContentLength64 = responseBuffer.LongLength;
 
 				var outStream = response.OutputStream;
@@ -137,7 +190,7 @@ namespace KeyServerNew {
 			}
 		}
 
-		private static async Task<JObject> ProcessRequest(
+		private async Task<JObject> ProcessRequest(
 			HttpListenerRequest request,
 			string validAccessToken) {
 			if (request.HttpMethod != "POST") {
@@ -184,7 +237,7 @@ namespace KeyServerNew {
 //			return null; // Never happens
 		}
 
-		private static async Task PerformAction(JObject request) {
+		private async Task PerformAction(JObject request) {
 			var action = request["action"]?.ToString();
 			switch (action) {
 				case "prev": {
@@ -215,8 +268,8 @@ namespace KeyServerNew {
 					var newVol = (double?) request["newVol"];
 					if (newVol == null) throw new MalformedJsonException("JSON has no `newVol` field");
 
-					await DefaultAudioDevice
-						.SetVolumeAsync((double) newVol); // Strange cast, we already checked for null...
+					await _defaultAudioDevice
+						.SetVolumeAsync(newVol.Value);
 					break;
 				}
 				case "hibernate": {
@@ -231,7 +284,7 @@ namespace KeyServerNew {
 			}
 		}
 
-		private static async Task<JObject> GetInfo() {
+		private async Task<JObject> GetInfo() {
 			var sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
 			var currentSession = sessionManager.GetCurrentSession();
 			GlobalSystemMediaTransportControlsSessionMediaProperties mediaProperties = null;
@@ -247,25 +300,37 @@ namespace KeyServerNew {
 				await previewStream.AsStream().ReadAsync(bytes, 0, (int) previewStream.Size);
 			}
 
-			var volume = await DefaultAudioDevice.GetVolumeAsync();
+			var volume = await _defaultAudioDevice.GetVolumeAsync();
 
 			var resultObj = new JObject {
 				["success"] = true,
 				["title"] = mediaProperties?.Title,
 				["volume"] = volume,
-				["muted"] = DefaultAudioDevice.IsMuted,
+				["muted"] = _defaultAudioDevice.IsMuted,
 				["preview"] = bytes != null ? Convert.ToBase64String(bytes) : null
 			};
-			_logger.Debug("Got result: {json}", resultObj);
+			_logger.Trace("Got result: {json}", resultObj);
 
 			return resultObj;
 		}
 
-		private static void PressKey(byte keyCode) {
+		private void PressKey(byte keyCode) {
 			_logger.Trace("Pressing key {keyCode}", keyCode);
-			keybd_event(keyCode, 0x45, KeyeventKeydown, 0);
+			keybd_event(keyCode, 0x45, KEYEVENTF_EXTENDEDKEY | 0, 0);
 			Thread.Sleep(50);
-			keybd_event(keyCode, 0x45, KeyeventKeyup, 0);
+			keybd_event(keyCode, 0x45, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
+		}
+
+		[SuppressMessage("ReSharper", "ALL")]
+		[StructLayout(LayoutKind.Sequential)]
+		public struct ServiceStatus {
+			public int dwServiceType;
+			public ServiceState dwCurrentState;
+			public int dwControlsAccepted;
+			public int dwWin32ExitCode;
+			public int dwServiceSpecificExitCode;
+			public int dwCheckPoint;
+			public int dwWaitHint;
 		}
 
 		[SuppressMessage("ReSharper", "ClassNeverInstantiated.Local")]
